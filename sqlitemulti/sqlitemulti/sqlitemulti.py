@@ -208,7 +208,8 @@ class SqliteMulti:
             print(f"Called from thread {thread_id}")
         if thread_id in self._result_queues:
             # we had a queue, is it still good? - we need some garbage collector to delete old queues
-            print("TODO - check thread")
+            if self._verbose:
+                print("TODO - check thread")
             result_queue = self._result_queues[thread_id][0]
         else:
             if self._own_process:
