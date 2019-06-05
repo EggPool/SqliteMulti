@@ -12,6 +12,7 @@ from queue import Queue
 from multiprocessing import Process, Manager
 from enum import Enum
 from time import time
+from typing import Union
 
 
 # When a queue is that old and empty, delete it
@@ -29,17 +30,18 @@ class SqlCommand(Enum):
 
 
 def sqlite_worker(
-    queue,
-    database,
-    timeout=5,
-    isolation_level=None,
-    uri=None,
-    verbose: bool = False,
+    queue, database, timeout=5, isolation_level="", uri=None, verbose: bool = False
 ):
     """Worker, running in thread or Process"""
     try:
         # print("isolation", isolation_level)
-        db = sqlite3.connect(database, timeout=timeout, isolation_level=isolation_level, uri=uri, check_same_thread=False)
+        db = sqlite3.connect(
+            database,
+            timeout=timeout,
+            isolation_level=isolation_level,
+            uri=uri,
+            check_same_thread=False,
+        )
     except Exception as e:
         if verbose:
             print(f"DB Process error at connect {e}")
@@ -54,41 +56,43 @@ def sqlite_worker(
             if verbose:
                 print(f"DB Queue got {command}:{sql} {params}")
             res = None
-            if command == SqlCommand.EXECUTE:
-                # Execute and sends None back
-                if params:
-                    db.execute(sql, params)
+            if command in (SqlCommand.EXECUTE, SqlCommand.INSERT, SqlCommand.DELETE):
+                if type(sql) is list:
+                    # We have a transaction - sql as well as params are lists
+                    if type(params) is not list:
+                        raise ValueError("Params has to be a list, too")
+                    try:
+                        for i, sql_line in enumerate(sql):
+                            db.execute(sql_line, params[i])
+                        commit = True  # Force commit since all went fine.
+                        res = True
+                    except Exception as e:
+                        print(f"Exception {e}")
+                        db.rollback()
+                        res = False
                 else:
-                    db.execute(sql)
+                    db.execute(sql, params)
+                    res = True
+            elif command == SqlCommand.EXECUTE:
+                # Execute and sends None back
+                db.execute(sql, params)
             elif command == SqlCommand.INSERT:
                 # Execute and sends inserted back
-                if params:
-                    db.execute(sql, params)
-                else:
-                    db.execute(sql)
+                db.execute(sql, params)
                 # TODO
                 # res =
             elif command == SqlCommand.DELETE:
                 # Execute and sends deleted back
-                if params:
-                    db.execute(sql, params)
-                else:
-                    db.execute(sql)
+                db.execute(sql, params)
                 # TODO
                 # res =
             elif command == SqlCommand.FETCHONE:
                 # Execute and sends the value back
-                if params:
-                    result = db.execute(sql, params)
-                else:
-                    result = db.execute(sql)
+                result = db.execute(sql, params)
                 res = result.fetchone()
             elif command == SqlCommand.FETCHALL:
                 # Execute and sends the value back
-                if params:
-                    result = db.execute(sql, params)
-                else:
-                    result = db.execute(sql)
+                result = db.execute(sql, params)
                 res = result.fetchall()
             elif command == SqlCommand.COMMIT:
                 db.commit()
@@ -112,7 +116,14 @@ def sqlite_worker(
 class SqliteMulti:
     """Tries to mimic sqlite3 interface as much as possible"""
 
-    __slots__ = ("_command_queue", "_own_process", "_result_queues", "_worker", "_verbose", "_stopping")
+    __slots__ = (
+        "_command_queue",
+        "_own_process",
+        "_result_queues",
+        "_worker",
+        "_verbose",
+        "_stopping",
+    )
 
     def __init__(
         self,
@@ -121,7 +132,7 @@ class SqliteMulti:
         isolation_level=None,
         uri=None,
         own_process=False,
-        verbose: bool=False,
+        verbose: bool = False,
     ):
         self._result_queues = dict()
         self._own_process = own_process
@@ -164,7 +175,7 @@ class SqliteMulti:
         cls,
         database,
         timeout=5,
-        isolation_level=None,
+        isolation_level="",  # Keep sqlite default, '' != None. None enforce auto commit.
         uri=None,
         own_process=False,
         verbose: bool = False,
@@ -192,7 +203,7 @@ class SqliteMulti:
         if self._verbose:
             print("Stop required")
         self._stopping = True
-        self._command_queue.put((None, SqlCommand.STOP, '', None, False))
+        self._command_queue.put((None, SqlCommand.STOP, "", None, False))
 
     def join(self):
         """Waits until the worker ends nicely. only to be called after a stop(), or will never return"""
@@ -202,8 +213,18 @@ class SqliteMulti:
             raise RuntimeError("Join was required, but no stop() before")
         self._worker.join()
 
-    def _execute(self, command: SqlCommand, sql: str, params=None, commit=False):
+    def _execute(
+        self,
+        command: SqlCommand,
+        sql: Union[str, list],
+        params: Union[None, tuple, list] = None,
+        commit: bool = False,
+    ):
         """Generic queued command. Enqueues the request, and waits for the answer."""
+        if params is None:
+            # This is to avoid https://www.thedigitalcatonline.com/blog/2015/02/11/default-arguments-in-python/#default-arguments-evaluation
+            # and https://docs.python-guide.org/writing/gotchas/#mutable-default-arguments
+            params = tuple()
         thread_id = str(get_ident())
         if self._verbose:
             print(f"Called from thread {thread_id}")
@@ -229,22 +250,39 @@ class SqliteMulti:
 
     def commit(self):
         """Signal the worker to commit"""
-        return self._execute(SqlCommand.COMMIT, '')
+        return self._execute(SqlCommand.COMMIT, "")
 
-    def execute(self, sql, params=None, commit=False):
-        """Emulates an execute. Enqueues the request, and waits for the answer."""
+    def execute(
+        self,
+        sql: Union[str, list],
+        params: Union[None, tuple, list] = None,
+        commit: bool = False,
+    ):
+        """Emulates an execute. Enqueues the request, and waits for the answer.
+        If a list of str is sent, they will be considered a transaction"""
         return self._execute(SqlCommand.EXECUTE, sql, params, commit)
 
-    def fetchall(self, sql, params=None):
+    def fetchall(self, sql: str, params: Union[None, tuple] = None):
         return self._execute(SqlCommand.FETCHALL, sql, params)
 
-    def fetchone(self, sql, params=None):
+    def fetchone(self, sql: str, params: Union[None, tuple] = None):
         return self._execute(SqlCommand.FETCHONE, sql, params)
 
-    def insert(self, sql, params=None, commit=True):
-        """Emulates an insert. commit is True by default. Enqueues the request, and waits for the answer."""
+    def insert(
+        self,
+        sql: Union[str, list],
+        params: Union[None, tuple, list] = None,
+        commit: bool = True,
+    ):
+        """Emulates an insert. commit is True by default. Enqueues the request, and waits for the answer.
+        If a list of str is sent, they will be considered a transaction"""
         return self._execute(SqlCommand.INSERT, sql, params, commit)
 
-    def delete(self, sql, params=None, commit=True):
+    def delete(
+        self,
+        sql: Union[str, list],
+        params: Union[None, tuple, list] = None,
+        commit: bool = True,
+    ):
         """Emulates a delete. commit is True by default. Enqueues the request, and waits for the answer."""
         return self._execute(SqlCommand.DELETE, sql, params, commit)
