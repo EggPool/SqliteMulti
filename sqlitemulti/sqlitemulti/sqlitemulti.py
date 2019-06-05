@@ -38,7 +38,8 @@ def sqlite_worker(
 ):
     """Worker, running in thread or Process"""
     try:
-        db = sqlite3.connect(database, timeout=timeout, isolation_level=isolation_level, uri=uri)
+        # print("isolation", isolation_level)
+        db = sqlite3.connect(database, timeout=timeout, isolation_level=isolation_level, uri=uri, check_same_thread=False)
     except Exception as e:
         if verbose:
             print(f"DB Process error at connect {e}")
