@@ -120,7 +120,7 @@ def sqlite_worker(
 
 
 class SqliteMulti:
-    """Tries to mimic sqlite3 interface as much as possible"""
+    """Tries to mimic sqlite3 interface as much as possible but add some convenient params"""
 
     __slots__ = (
         "_command_queues",
@@ -132,17 +132,19 @@ class SqliteMulti:
         "_tasks",
         "_current_queue",
         "_lock",
+        "_result_queues_lock",
+        "_trigger_garbage_collector"
     )
 
     def __init__(
         self,
         database,
         timeout=5,
-        isolation_level=None,
+        isolation_level="",
         uri=None,
         own_process=False,
         verbose: bool = False,
-        tasks: int=1
+        tasks: int = 1,
     ):
         if tasks < 1:
             tasks = 1
@@ -152,7 +154,9 @@ class SqliteMulti:
         self._stopping = False
         self._tasks = tasks
         self._current_queue = 0
-        self._lock = Lock()
+        self._lock = Lock()  # Lock for command queue select
+        self._result_queues_lock = Lock()  # Lock for result Queue cleaning
+        self._trigger_garbage_collector = False
         if verbose:
             print("__Init__")
 
@@ -163,32 +167,49 @@ class SqliteMulti:
                 queue = Manager().Queue()
                 worker = Process(
                     target=sqlite_worker,
-                    args=(
-                        queue,
-                        database,
-                        timeout,
-                        isolation_level,
-                        uri,
-                        verbose,
-                    ),
+                    args=(queue, database, timeout, isolation_level, uri, verbose),
                 )
             else:
                 queue = Queue()
                 worker = Thread(
                     target=sqlite_worker,
-                    args=(
-                        queue,
-                        database,
-                        timeout,
-                        isolation_level,
-                        uri,
-                        verbose,
-                    ),
+                    args=(queue, database, timeout, isolation_level, uri, verbose),
                 )
             worker.daemon = False
             worker.start()
             self._workers.append(worker)
             self._command_queues.append(queue)
+
+    def trigger_garbage_collector(self):
+        """Asks the object to run a garbage collector on next _execute() call"""
+        with self._result_queues_lock:
+            self._trigger_garbage_collector = True
+
+    def _run_garbage_collector(self):
+        """We suppose we will run the GC often enough that we won't delete queues that could be used."""
+        if self._verbose:
+            print("Experimental GC")
+        now = time()
+        with self._result_queues_lock:
+            to_remove = []
+            for tid, value in self._result_queues.items():
+                if value[1] < now:
+                    # TODO: Check that queue is empty?
+                    # If not, there will be a local reference to that queue somewhere, so it should be ok.
+                    to_remove.append(tid)
+            for tid in to_remove:
+                self._result_queues.pop(tid)
+                if self._verbose:
+                    print(f"Removed Result Queue for Thread {tid}")
+        self._trigger_garbage_collector = False
+
+    def delete_thread_id(self, thread_id: int=0) -> None:
+        """Instead of using the GC, we can explicitly inform the object a thread closed so it can free the related result queue
+        should give better perfs. Can be called from client worker, just before the thread closes."""
+        if thread_id == 0:
+            thread_id = get_ident()
+        with self._result_queues_lock:
+            self._result_queues.pop(str(thread_id))
 
     @classmethod
     def connect(
@@ -199,18 +220,19 @@ class SqliteMulti:
         uri=None,
         own_process=False,
         verbose: bool = False,
-        tasks: int=1,
+        tasks: int = 1,
     ):
         """Alias to __init__, to be alike sqlite3 interface"""
         return cls(database, timeout, isolation_level, uri, own_process, verbose, tasks)
 
     def status(self) -> str:
         """Returns a status of current queues occupation"""
-        status = ""
+        task_type = "Processes" if self._own_process else "Threads"
+        status = f"{self._tasks} tasks in {task_type}.\n"
         try:
             total = [queue.qsize() for queue in self._command_queues]
             total = sum(total)
-            status = f"{total} commands\n"
+            status += f"{total} commands\n"
         except:
             # Note that this may raise NotImplementedError on Unix platforms like Mac OS X where sem_getvalue() is not implemented.
             pass
@@ -251,22 +273,25 @@ class SqliteMulti:
             # This is to avoid https://www.thedigitalcatonline.com/blog/2015/02/11/default-arguments-in-python/#default-arguments-evaluation
             # and https://docs.python-guide.org/writing/gotchas/#mutable-default-arguments
             params = tuple()
+        if self._trigger_garbage_collector:
+            self._run_garbage_collector()
         thread_id = str(get_ident())
         if self._verbose:
             print(f"Called from thread {thread_id}")
         if thread_id in self._result_queues:
-            # we had a queue, is it still good? - we need some garbage collector to delete old queues
-            if self._verbose:
-                print("TODO - check thread")
             result_queue = self._result_queues[thread_id][0]
         else:
             if self._own_process:
                 result_queue = Manager().Queue()
             else:
                 result_queue = Queue()
-            self._result_queues[thread_id] = (result_queue, time() + OLD_QUEUE_TRIGGER)
+            with self._result_queues_lock():
+                # Queue, expiration timestamp
+                self._result_queues[thread_id] = (result_queue, time() + OLD_QUEUE_TRIGGER)
+        # TODO: we should update the timestamp of the result queue to keep it active from GC.
+        # Will systematic calls to time() for every _execute induce significant perfs losses?
 
-        queue_index = self._current_queue
+        queue_index = self._current_queue  # What command queue to use?
         if self._tasks > 1:
             with self._lock:
                 self._current_queue += 1
@@ -274,7 +299,9 @@ class SqliteMulti:
                     self._current_queue = 0
                 queue_index = self._current_queue
         # Enqueue the command
-        self._command_queues[queue_index].put((result_queue, command, sql, params, commit))
+        self._command_queues[queue_index].put(
+            (result_queue, command, sql, params, commit)
+        )
         # And wait for its answer
         if self._verbose:
             print("Waiting...")

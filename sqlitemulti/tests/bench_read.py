@@ -1,5 +1,5 @@
 """
-Benchmark: direct db write from several threads vs queued
+Benchmark: read from several threads vs queued / thread pool / process pool
 """
 
 import os
@@ -237,16 +237,6 @@ if __name__ == "__main__":
     print(f"SqliteMulti, Processes=4: {total} s")
     db.stop()
     db.join()
-
-    """
-    db = SqliteMulti.connect("benchr.db", own_process=True, tasks=8, verbose=False)
-    start = time()
-    bench_queue(db)
-    total = time() - start
-    print(f"SqliteMulti, Processes=8: {total} s")
-    db.stop()
-    db.join()
-    """
 
     db = SqliteMulti.connect("benchr.db", own_process=False, tasks=4, verbose=False)
     start = time()
