@@ -15,9 +15,11 @@ from sqlitemulti.sqlitemulti import SqliteMulti
 
 
 # Create mempool table
-SQL_CREATE = "CREATE TABLE IF NOT EXISTS transactions (" \
-             "timestamp TEXT, address TEXT, recipient TEXT, amount TEXT, signature TEXT, " \
-             "public_key TEXT, operation TEXT, openfield TEXT, mergedts INTEGER)"
+SQL_CREATE = (
+    "CREATE TABLE IF NOT EXISTS transactions ("
+    "timestamp TEXT, address TEXT, recipient TEXT, amount TEXT, signature TEXT, "
+    "public_key TEXT, operation TEXT, openfield TEXT, mergedts INTEGER)"
+)
 
 
 def test_connect_db():
@@ -33,7 +35,10 @@ def test_create_table():
     db.execute(SQL_CREATE, commit=True)  # Will do sql + commit
     # reread
     res = db.fetchall("PRAGMA table_info('transactions')")
-    assert str(res) == "[(0, 'timestamp', 'TEXT', 0, None, 0), (1, 'address', 'TEXT', 0, None, 0), (2, 'recipient', 'TEXT', 0, None, 0), (3, 'amount', 'TEXT', 0, None, 0), (4, 'signature', 'TEXT', 0, None, 0), (5, 'public_key', 'TEXT', 0, None, 0), (6, 'operation', 'TEXT', 0, None, 0), (7, 'openfield', 'TEXT', 0, None, 0), (8, 'mergedts', 'INTEGER', 0, None, 0)]"
+    assert (
+        str(res)
+        == "[(0, 'timestamp', 'TEXT', 0, None, 0), (1, 'address', 'TEXT', 0, None, 0), (2, 'recipient', 'TEXT', 0, None, 0), (3, 'amount', 'TEXT', 0, None, 0), (4, 'signature', 'TEXT', 0, None, 0), (5, 'public_key', 'TEXT', 0, None, 0), (6, 'operation', 'TEXT', 0, None, 0), (7, 'openfield', 'TEXT', 0, None, 0), (8, 'mergedts', 'INTEGER', 0, None, 0)]"
+    )
 
 
 if __name__ == "__main__":
@@ -45,9 +50,12 @@ if __name__ == "__main__":
     # reread
     res = db.fetchall("PRAGMA table_info('transactions')")
     print(res)
-    assert str(res) == "[(0, 'timestamp', 'TEXT', 0, None, 0), (1, 'address', 'TEXT', 0, None, 0), (2, 'recipient', 'TEXT', 0, None, 0), (3, 'amount', 'TEXT', 0, None, 0), (4, 'signature', 'TEXT', 0, None, 0), (5, 'public_key', 'TEXT', 0, None, 0), (6, 'operation', 'TEXT', 0, None, 0), (7, 'openfield', 'TEXT', 0, None, 0), (8, 'mergedts', 'INTEGER', 0, None, 0)]"
+    assert (
+        str(res)
+        == "[(0, 'timestamp', 'TEXT', 0, None, 0), (1, 'address', 'TEXT', 0, None, 0), (2, 'recipient', 'TEXT', 0, None, 0), (3, 'amount', 'TEXT', 0, None, 0), (4, 'signature', 'TEXT', 0, None, 0), (5, 'public_key', 'TEXT', 0, None, 0), (6, 'operation', 'TEXT', 0, None, 0), (7, 'openfield', 'TEXT', 0, None, 0), (8, 'mergedts', 'INTEGER', 0, None, 0)]"
+    )
 
     db.stop()
     print(db.status())
-    # Wait for end
+    #  Wait for end
     db.join()

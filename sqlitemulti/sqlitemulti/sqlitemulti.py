@@ -4,6 +4,9 @@
 Main module.
 
 SqliteMulti classes, sqlite3 wrapped for threadsafe calls and serialization.
+
+ref, see
+https://charlesleifer.com/blog/going-fast-with-sqlite-and-python/
 """
 
 import sqlite3
@@ -68,7 +71,7 @@ def sqlite_worker(
                         for i, sql_line in enumerate(sql):
                             db.execute(sql_line, params[i])
                         commit = True  # Force commit since all went fine.
-                        # TODO: returns proper info depending on request.
+                        #  TODO: returns proper info depending on request.
                         res = len(sql)  # returns len of sql
                     except Exception as e:
                         print(f"Exception {e}")
@@ -266,10 +269,7 @@ class SqliteMulti:
         return self._execute(SqlCommand.EXECUTE, sql, params, commit)
 
     def executemany(
-        self,
-        sql: str,
-        params: Union[None, tuple, list] = None,
-        commit: bool = False,
+        self, sql: str, params: Union[None, tuple, list] = None, commit: bool = False
     ):
         """Emulates an executemany. Single sql, list opf params."""
         return self._execute(SqlCommand.EXECUTEMANY, sql, params, commit)

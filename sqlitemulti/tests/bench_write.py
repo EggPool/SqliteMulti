@@ -17,8 +17,10 @@ THREAD_COUNT = 10
 RUN_COUNT = 10
 
 # Create test table
-SQL_CREATE = "CREATE TABLE IF NOT EXISTS transactions (" \
-             "timestamp TEXT, address TEXT, amount TEXT)"
+SQL_CREATE = (
+    "CREATE TABLE IF NOT EXISTS transactions ("
+    "timestamp TEXT, address TEXT, amount TEXT)"
+)
 
 SQL_INSERT = "INSERT INTO transactions VALUES (?,?,?)"
 
@@ -34,7 +36,11 @@ def make_data():
         run = []
         for lines in range(THREAD_COUNT):
             # Fake data
-            line = (random.randint(0, 999999), random.randint(0, 9999999999), random.randint(0, 99999999999999)/1e8)
+            line = (
+                random.randint(0, 999999),
+                random.randint(0, 9999999999),
+                random.randint(0, 99999999999999) / 1e8,
+            )
             run.append(line)
         DATA.append(run)
 
@@ -101,7 +107,7 @@ def bench_queue(single_commits=True):
     # write from SqliteMulti
     if os.path.isfile("bench2.db"):
         os.remove("bench2.db")
-    db = SqliteMulti.connect("bench2.db", isolation_level='', verbose=False)
+    db = SqliteMulti.connect("bench2.db", isolation_level="", verbose=False)
     db.execute(SQL_CREATE, commit=True)  # Will do sql + commit
     for i in range(RUN_COUNT):
         for t in range(THREAD_COUNT):
@@ -112,7 +118,7 @@ def bench_queue(single_commits=True):
     if not single_commits:
         db.commit()
     db.stop()
-    # Wait for end
+    #  Wait for end
     db.join()
 
 
@@ -120,7 +126,7 @@ def bench_queue_transaction():
     # write from SqliteMulti, by sending him batch of sql to execute as transactions with implicit commit at the end.
     if os.path.isfile("bench3.db"):
         os.remove("bench3.db")
-    db = SqliteMulti.connect("bench3.db", isolation_level='', verbose=False)
+    db = SqliteMulti.connect("bench3.db", isolation_level="", verbose=False)
     db.execute(SQL_CREATE, commit=True)  # Will do sql + commit
     sql = [SQL_INSERT for i in range(THREAD_COUNT)]
     for i in range(RUN_COUNT):
@@ -129,11 +135,12 @@ def bench_queue_transaction():
     db.stop()
     db.join()
 
+
 def bench_queue_many():
     # write from SqliteMulti, by sending him batch of sql to execute as transactions with implicit commit at the end.
     if os.path.isfile("bench5.db"):
         os.remove("bench5.db")
-    db = SqliteMulti.connect("bench5.db", isolation_level='', verbose=False)
+    db = SqliteMulti.connect("bench5.db", isolation_level="", verbose=False)
     db.execute(SQL_CREATE, commit=True)  # Will do sql + commit
     for i in range(RUN_COUNT):
         # sql is str, params a lists
