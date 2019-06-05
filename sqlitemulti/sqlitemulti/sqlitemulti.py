@@ -285,7 +285,7 @@ class SqliteMulti:
                 result_queue = Manager().Queue()
             else:
                 result_queue = Queue()
-            with self._result_queues_lock():
+            with self._result_queues_lock:
                 # Queue, expiration timestamp
                 self._result_queues[thread_id] = (result_queue, time() + OLD_QUEUE_TRIGGER)
         # TODO: we should update the timestamp of the result queue to keep it active from GC.
