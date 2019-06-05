@@ -10,7 +10,7 @@ https://charlesleifer.com/blog/going-fast-with-sqlite-and-python/
 """
 
 import sqlite3
-from threading import Thread, get_ident
+from threading import Thread, get_ident, Lock
 from queue import Queue
 from multiprocessing import Process, Manager
 from enum import Enum
@@ -46,7 +46,7 @@ def sqlite_worker(
             timeout=timeout,
             isolation_level=isolation_level,
             uri=uri,
-            check_same_thread=False,
+            check_same_thread=False,  # We will not need this, but I suppose this could save some tests/time.
         )
     except Exception as e:
         if verbose:
@@ -123,12 +123,15 @@ class SqliteMulti:
     """Tries to mimic sqlite3 interface as much as possible"""
 
     __slots__ = (
-        "_command_queue",
+        "_command_queues",
         "_own_process",
         "_result_queues",
-        "_worker",
+        "_workers",
         "_verbose",
         "_stopping",
+        "_tasks",
+        "_current_queue",
+        "_lock",
     )
 
     def __init__(
@@ -139,42 +142,53 @@ class SqliteMulti:
         uri=None,
         own_process=False,
         verbose: bool = False,
+        tasks: int=1
     ):
+        if tasks < 1:
+            tasks = 1
         self._result_queues = dict()
         self._own_process = own_process
         self._verbose = verbose
         self._stopping = False
+        self._tasks = tasks
+        self._current_queue = 0
+        self._lock = Lock()
         if verbose:
             print("__Init__")
-        if own_process:
-            self._command_queue = Manager().Queue()
-            self._worker = Process(
-                target=sqlite_worker,
-                args=(
-                    self._command_queue,
-                    database,
-                    timeout,
-                    isolation_level,
-                    uri,
-                    verbose,
-                ),
-            )
-            self._worker.daemon = False
-        else:
-            self._command_queue = Queue()
-            self._worker = Thread(
-                target=sqlite_worker,
-                args=(
-                    self._command_queue,
-                    database,
-                    timeout,
-                    isolation_level,
-                    uri,
-                    verbose,
-                ),
-            )
-            self._worker.daemon = True
-        self._worker.start()
+
+        self._workers = []
+        self._command_queues = []
+        for i in range(self._tasks):
+            if own_process:
+                queue = Manager().Queue()
+                worker = Process(
+                    target=sqlite_worker,
+                    args=(
+                        queue,
+                        database,
+                        timeout,
+                        isolation_level,
+                        uri,
+                        verbose,
+                    ),
+                )
+            else:
+                queue = Queue()
+                worker = Thread(
+                    target=sqlite_worker,
+                    args=(
+                        queue,
+                        database,
+                        timeout,
+                        isolation_level,
+                        uri,
+                        verbose,
+                    ),
+                )
+            worker.daemon = False
+            worker.start()
+            self._workers.append(worker)
+            self._command_queues.append(queue)
 
     @classmethod
     def connect(
@@ -185,14 +199,18 @@ class SqliteMulti:
         uri=None,
         own_process=False,
         verbose: bool = False,
+        tasks: int=1,
     ):
         """Alias to __init__, to be alike sqlite3 interface"""
-        return cls(database, timeout, isolation_level, uri, own_process, verbose)
+        return cls(database, timeout, isolation_level, uri, own_process, verbose, tasks)
 
     def status(self) -> str:
         """Returns a status of current queues occupation"""
+        status = ""
         try:
-            status = f"{self._command_queue.qsize()} commands\n"
+            total = [queue.qsize() for queue in self._command_queues]
+            total = sum(total)
+            status = f"{total} commands\n"
         except:
             # Note that this may raise NotImplementedError on Unix platforms like Mac OS X where sem_getvalue() is not implemented.
             pass
@@ -205,11 +223,12 @@ class SqliteMulti:
         return status
 
     def stop(self):
-        """Signal the worker to end"""
+        """Signal the workers to end"""
         if self._verbose:
             print("Stop required")
         self._stopping = True
-        self._command_queue.put((None, SqlCommand.STOP, "", None, False))
+        for queue in self._command_queues:
+            queue.put((None, SqlCommand.STOP, "", None, False))
 
     def join(self):
         """Waits until the worker ends nicely. only to be called after a stop(), or will never return"""
@@ -217,7 +236,8 @@ class SqliteMulti:
             print("Join required")
         if not self._stopping:
             raise RuntimeError("Join was required, but no stop() before")
-        self._worker.join()
+        for worker in self._workers:
+            worker.join()
 
     def _execute(
         self,
@@ -245,8 +265,16 @@ class SqliteMulti:
             else:
                 result_queue = Queue()
             self._result_queues[thread_id] = (result_queue, time() + OLD_QUEUE_TRIGGER)
+
+        queue_index = self._current_queue
+        if self._tasks > 1:
+            with self._lock:
+                self._current_queue += 1
+                if self._current_queue >= self._tasks:
+                    self._current_queue = 0
+                queue_index = self._current_queue
         # Enqueue the command
-        self._command_queue.put((result_queue, command, sql, params, commit))
+        self._command_queues[queue_index].put((result_queue, command, sql, params, commit))
         # And wait for its answer
         if self._verbose:
             print("Waiting...")

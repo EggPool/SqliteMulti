@@ -142,6 +142,34 @@ def bench_threads2():
     print(f" Total {TOTAL}")
 
 
+def sqlite_queuereader(t_index, db, params):
+    global TOTAL
+    res = db.fetchone(SQL_READ, (params[0], params[0] + params[1]))[0]
+    with LOCK:
+        if res is None:
+            res = 0
+        TOTAL += res
+
+
+def bench_queue(multi_db):
+    global TOTAL
+    TOTAL = 0
+    # reads from threads, one single SqliteMulti
+    for i in range(RUN_COUNT):
+        threads = []
+        for t in range(THREAD_COUNT):
+            thread = threading.Thread(
+                target=sqlite_queuereader,
+                args=(t, multi_db, DATA[i][t]),
+            )
+            thread.daemon = True
+            thread.start()
+            threads.append(thread)
+        for t in threads:
+            t.join()
+    print(f" Total {TOTAL}")
+
+
 if __name__ == "__main__":
 
     start = time()
@@ -166,6 +194,72 @@ if __name__ == "__main__":
     start = time()
     bench_threads2()
     total = time() - start
-    """Note that the lock (needed to calc TOTAL does not impact the speed. 
-    even without lock, even with no calc, timing is similar."""
     print(f"Direct, {THREAD_COUNT} threads own db: {total} s")
+
+    db = SqliteMulti.connect("benchr.db", own_process=False, tasks=1)
+    start = time()
+    bench_queue(db)
+    total = time() - start
+    print(f"SqliteMulti, Threads=1: {total} s")
+    db.stop()
+    db.join()
+
+    """There's is an overhead for initial worker creation, why the object init/release is out of the bench.
+    in real apps, these will also be done once only."""
+    db = SqliteMulti.connect("benchr.db", own_process=True, tasks=1)
+    start = time()
+    bench_queue(db)
+    total = time() - start
+    print(f"SqliteMulti, Processes=1: {total} s")
+    db.stop()
+    db.join()
+
+    db = SqliteMulti.connect("benchr.db", own_process=True, tasks=2, verbose=False)
+    start = time()
+    bench_queue(db)
+    total = time() - start
+    print(f"SqliteMulti, Processes=2: {total} s")
+    db.stop()
+    db.join()
+
+    db = SqliteMulti.connect("benchr.db", own_process=True, tasks=4, verbose=False)
+    start = time()
+    bench_queue(db)
+    total = time() - start
+    print(f"SqliteMulti, Processes=4: {total} s")
+    db.stop()
+    db.join()
+
+    """
+    db = SqliteMulti.connect("benchr.db", own_process=True, tasks=8, verbose=False)
+    start = time()
+    bench_queue(db)
+    total = time() - start
+    print(f"SqliteMulti, Processes=8: {total} s")
+    db.stop()
+    db.join()
+    """
+
+    db = SqliteMulti.connect("benchr.db", own_process=False, tasks=4, verbose=False)
+    start = time()
+    bench_queue(db)
+    total = time() - start
+    print(f"SqliteMulti, Threads=4: {total} s")
+    db.stop()
+    db.join()
+
+    db = SqliteMulti.connect("benchr.db", own_process=False, tasks=8, verbose=False)
+    start = time()
+    bench_queue(db)
+    total = time() - start
+    print(f"SqliteMulti, Threads=8: {total} s")
+    db.stop()
+    db.join()
+
+    db = SqliteMulti.connect("benchr.db", own_process=False, tasks=16, verbose=False)
+    start = time()
+    bench_queue(db)
+    total = time() - start
+    print(f"SqliteMulti, Threads=16: {total} s")
+    db.stop()
+    db.join()
