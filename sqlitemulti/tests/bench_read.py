@@ -28,6 +28,12 @@ SQL_INSERT = "INSERT INTO transactions VALUES (?,?,?)"
 
 SQL_READ = "SELECT SUM(amount) FROM transactions WHERE timestamp >= ? and timestamp <= ?"
 
+SQL_CREATE_INDEX = (
+    "CREATE INDEX index1 on transactions(timestamp)"
+)
+
+CREATE_INDEX = False  # Set to True to add the index.
+
 
 DATA = []
 TOTAL = 0
@@ -40,6 +46,8 @@ def write_data():
         os.remove("benchr.db")
     db = sqlite3.connect("benchr.db")
     db.execute(SQL_CREATE)
+    if CREATE_INDEX:
+        db.execute(SQL_CREATE_INDEX)
     db.commit()
     random.seed("let do this deterministic")
     for lines in range(TOTAL_RECORDS):
