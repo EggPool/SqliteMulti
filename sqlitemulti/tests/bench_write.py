@@ -39,13 +39,14 @@ def make_data():
         DATA.append(run)
 
 
-def sqlite_writer(t_index, db, sql, params):
+def sqlite_writer(t_index, db, sql, params, commit):
     with LOCK:
         db.execute(sql, params)
-        db.commit()
+        if commit:
+            db.commit()
 
 
-def bench_direct():
+def bench_direct(single_commits=True):
     # write from threads with lock - 17sec
     if os.path.isfile("bench1.db"):
         os.remove("bench1.db")
@@ -57,16 +58,18 @@ def bench_direct():
         for t in range(THREAD_COUNT):
             thread = threading.Thread(
                 target=sqlite_writer,
-                args=(t, db, SQL_INSERT, DATA[i][t]),
+                args=(t, db, SQL_INSERT, DATA[i][t], single_commits),
             )
             thread.daemon = True
             thread.start()
             threads.append(thread)
         for t in threads:
             t.join()
+    if not single_commits:
+        db.commit()
 
 
-def bench_queue():
+def bench_queue(single_commits=True):
     # write from SqliteMulti
     if os.path.isfile("bench2.db"):
         os.remove("bench2.db")
@@ -74,7 +77,12 @@ def bench_queue():
     db.execute(SQL_CREATE, commit=True)  # Will do sql + commit
     for i in range(RUN_COUNT):
         for t in range(THREAD_COUNT):
-            db.execute(SQL_INSERT, DATA[i][t], commit=True)
+            if single_commits:
+                db.execute(SQL_INSERT, DATA[i][t], commit=True)
+            else:
+                db.execute(SQL_INSERT, DATA[i][t], commit=False)
+    if not single_commits:
+        db.commit()
     db.stop()
     # Wait for end
     db.join()
@@ -85,12 +93,21 @@ if __name__ == "__main__":
     make_data()
     # print(DATA)
     start = time()
-    bench_direct()
+    bench_direct(single_commits=False)
     total = time() - start
-    print(f"Direct: {total} s")
+    print(f"Direct, no single commits: {total} s")
 
     start = time()
-    bench_queue()
+    bench_direct(single_commits=True)
     total = time() - start
-    print(f"Queue: {total} s")
+    print(f"Direct, single commits: {total} s")
 
+    start = time()
+    bench_queue(single_commits=False)
+    total = time() - start
+    print(f"Queue, no single commits: {total} s")
+
+    start = time()
+    bench_queue(single_commits=True)
+    total = time() - start
+    print(f"Queue, single commits: {total} s")
