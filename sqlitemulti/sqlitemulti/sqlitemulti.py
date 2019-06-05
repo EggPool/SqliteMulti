@@ -21,12 +21,15 @@ OLD_QUEUE_TRIGGER = 60 * 5
 
 class SqlCommand(Enum):
     EXECUTE = 1
-    INSERT = 2
-    DELETE = 3
-    FETCHONE = 4
-    FETCHALL = 5
-    COMMIT = 6
-    STOP = 7
+    EXECUTEMANY = 2
+    INSERT = 3
+    INSERTMANY = 4  # not used yet
+    DELETE = 5
+    DELETEMANY = 6  # not used yet
+    FETCHONE = 7
+    FETCHALL = 8
+    COMMIT = 9
+    STOP = 10
 
 
 def sqlite_worker(
@@ -65,7 +68,8 @@ def sqlite_worker(
                         for i, sql_line in enumerate(sql):
                             db.execute(sql_line, params[i])
                         commit = True  # Force commit since all went fine.
-                        res = True
+                        # TODO: returns proper info depending on request.
+                        res = len(sql)  # returns len of sql
                     except Exception as e:
                         print(f"Exception {e}")
                         db.rollback()
@@ -73,19 +77,18 @@ def sqlite_worker(
                 else:
                     db.execute(sql, params)
                     res = True
-            elif command == SqlCommand.EXECUTE:
-                # Execute and sends None back
-                db.execute(sql, params)
-            elif command == SqlCommand.INSERT:
-                # Execute and sends inserted back
-                db.execute(sql, params)
-                # TODO
-                # res =
-            elif command == SqlCommand.DELETE:
-                # Execute and sends deleted back
-                db.execute(sql, params)
-                # TODO
-                # res =
+                    if command == SqlCommand.INSERT:
+                        # TODO: send inserted count back
+                        pass
+                    elif command == SqlCommand.DELETE:
+                        # TODO: sends deleted back
+                        pass
+            elif command == SqlCommand.EXECUTEMANY:
+                # Execute and sends the value back
+                db.executemany(sql, params)
+                commit = True
+                res = True
+
             elif command == SqlCommand.FETCHONE:
                 # Execute and sends the value back
                 result = db.execute(sql, params)
@@ -261,6 +264,15 @@ class SqliteMulti:
         """Emulates an execute. Enqueues the request, and waits for the answer.
         If a list of str is sent, they will be considered a transaction"""
         return self._execute(SqlCommand.EXECUTE, sql, params, commit)
+
+    def executemany(
+        self,
+        sql: str,
+        params: Union[None, tuple, list] = None,
+        commit: bool = False,
+    ):
+        """Emulates an executemany. Single sql, list opf params."""
+        return self._execute(SqlCommand.EXECUTEMANY, sql, params, commit)
 
     def fetchall(self, sql: str, params: Union[None, tuple] = None):
         return self._execute(SqlCommand.FETCHALL, sql, params)

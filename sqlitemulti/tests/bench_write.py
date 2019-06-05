@@ -129,6 +129,18 @@ def bench_queue_transaction():
     db.stop()
     db.join()
 
+def bench_queue_many():
+    # write from SqliteMulti, by sending him batch of sql to execute as transactions with implicit commit at the end.
+    if os.path.isfile("bench5.db"):
+        os.remove("bench5.db")
+    db = SqliteMulti.connect("bench5.db", isolation_level='', verbose=False)
+    db.execute(SQL_CREATE, commit=True)  # Will do sql + commit
+    for i in range(RUN_COUNT):
+        # sql is str, params a lists
+        db.executemany(SQL_INSERT, DATA[i])
+    db.stop()
+    db.join()
+
 
 if __name__ == "__main__":
 
@@ -154,6 +166,11 @@ if __name__ == "__main__":
     bench_queue_transaction()
     total = time() - start
     print(f"Queue, transactions: {total} s")
+
+    start = time()
+    bench_queue_many()
+    total = time() - start
+    print(f"Queue, executemany: {total} s")
 
     start = time()
     bench_direct_many()
